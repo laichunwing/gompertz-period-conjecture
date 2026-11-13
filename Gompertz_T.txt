@@ -1,0 +1,170 @@
+# ==============================================================
+#  Numerical verification for the Euler–Gompertz paper
+#  SageMath 9.x / 10.x
+#  FIXED: mp.dps (not mp.mp.dps); DIGITS cast to int; safe complex.
+# ==============================================================
+
+from sage.all import *
+from mpmath import mp, pslq, quad, inf, nstr
+
+# --------------------------------------------------------------
+# 0. Precision setup
+# --------------------------------------------------------------
+DIGITS = int(800)          # int(...) so mpmath accepts it
+mp.dps = DIGITS
+R = RealField(DIGITS * 4)  # only used for display; harmless
+
+pi_mp    = mp.pi
+e_mp     = mp.e
+E1_mp    = mp.e1(1)
+einv_mp  = 1 / e_mp
+delta_mp = e_mp * E1_mp
+
+# Independent confirmation via quadrature
+E1_int_mp    = quad(lambda t: mp.e**(-t) / t,       [1, inf])
+delta_int_mp = quad(lambda t: mp.e**(-t) / (1 + t), [0, inf])
+
+# ==============================================================
+# 1. Period matrix
+# ==============================================================
+print("=" * 70)
+print(f"1. PERIOD MATRIX OF M(δ)   [{DIGITS} decimal digits]")
+print("=" * 70)
+print(f"   e^(-1)        = {nstr(einv_mp, 50)}")
+print(f"   E_1(1)        = {nstr(E1_mp, 50)}")
+print(f"   2πi           = {nstr(mp.mpc(0, 2*pi_mp), 50)}")
+print(f"   δ = e·E_1(1)  = {nstr(delta_mp, 50)}")
+print()
+print(f"   |E_1(1) - ∫_1^∞ e^(-t)/t dt|       = {nstr(abs(E1_mp - E1_int_mp), 5)}")
+print(f"   |δ      - ∫_0^∞ e^(-t)/(1+t) dt|   = {nstr(abs(delta_mp - delta_int_mp), 5)}")
+print(f"   E_1(1) > 0 ?  {E1_mp > 0}")
+print(f"   δ > 0 ?       {delta_mp > 0}")
+print()
+
+# ==============================================================
+# 2. Positive control
+# ==============================================================
+print("=" * 70)
+print("2. POSITIVE CONTROL: PSLQ detects a planted relation")
+print("=" * 70)
+# Relation: 1·e + (−1)·(e+1) + 1·1 = 0
+planted = pslq([e_mp, e_mp + 1, mp.mpf(1)],
+               maxcoeff=10, maxsteps=10**4)
+print(f"   pslq([e, e+1, 1]) = {planted}   (expected [±1, ∓1, ±1])")
+print()
+
+# ==============================================================
+# Helper: PSLQ with residual verification
+# ==============================================================
+def pslq_check(mons, maxcoeff, maxsteps, label, digits=None):
+    """
+    A *genuine* relation at `digits` dps has residual ≲ maxcoeff·10^(-digits).
+    A *spurious* one has residual vastly larger.  We require residual < 10^(-(digits-50)).
+    """
+    if digits is None:
+        digits = mp.dps
+    n   = len(mons)
+    tol = mp.mpf(10) ** (-(digits - 100))
+    rel = pslq(mons, tol=tol, maxcoeff=maxcoeff, maxsteps=maxsteps)
+
+    if rel is None:
+        print(f"   {label}: {n} monomials, NO relation "
+              f"(coeff ≤ {maxcoeff:.0e}, {digits} digits)")
+        return None
+
+    residual  = abs(mp.fsum([mp.mpf(a) * x for a, x in zip(rel, mons)]))
+    maxa      = max(abs(a) for a in rel)
+    threshold = mp.mpf(10) ** (-(digits - 50))
+
+    print(f"   {label}: {n} monomials, PSLQ returned a vector "
+          f"(max|a| = {maxa}, residual = {nstr(residual, 5)})")
+    if residual < threshold:
+        print(f"      → GENUINE relation")
+        return rel
+    else:
+        print(f"      → FALSE POSITIVE "
+              f"(residual > {nstr(threshold, 3)})")
+        return None
+
+# ==============================================================
+# 3. Statement (A): trdeg_Q Q(π, e) = 2
+# ==============================================================
+print("=" * 70)
+print("3. STATEMENT (A): trdeg_Q Q(π, e) = 2   [Schanuel for (1, 2πi)]")
+print("=" * 70)
+for d in [2, 3, 4, 5, 6]:
+    mons = [mp.mpf(1)]
+    for i in range(d + 1):
+        for j in range(d + 1 - i):
+            if i + j >= 1:
+                mons.append(pi_mp**i * e_mp**j)
+    pslq_check(mons, maxcoeff=10**15, maxsteps=10**5, label=f"degree ≤ {d}")
+print()
+
+# ==============================================================
+# 4. Statement (B): trdeg_Q Q(π, e, E_1(1)) = 3
+# ==============================================================
+print("=" * 70)
+print("4. STATEMENT (B): trdeg_Q Q(π, e, E_1(1)) = 3")
+print("=" * 70)
+for d in [2, 3, 4]:
+    mons = [mp.mpf(1)]
+    for i in range(d + 1):
+        for j in range(d + 1 - i):
+            for k in range(d + 1 - i - j):
+                if i + j + k >= 1:
+                    mons.append(pi_mp**i * e_mp**j * E1_mp**k)
+    pslq_check(mons, maxcoeff=10**12, maxsteps=10**5, label=f"degree ≤ {d}")
+print()
+
+# ==============================================================
+# 5. Cross-check at 1500 digits  (may take several minutes)
+# ==============================================================
+print("=" * 70)
+print("5. CROSS-CHECK: degree-4 (B) test at 1500 digits")
+print("=" * 70)
+mp.dps = 1500
+pi2, e2, E12 = mp.pi, mp.e, mp.e1(1)
+mons = [mp.mpf(1)]
+d = 4
+for i in range(d + 1):
+    for j in range(d + 1 - i):
+        for k in range(d + 1 - i - j):
+            if i + j + k >= 1:
+                mons.append(pi2**i * e2**j * E12**k)
+pslq_check(mons, maxcoeff=10**12, maxsteps=10**5,
+           label=f"degree ≤ {d} @1500 digits", digits=1500)
+mp.dps = DIGITS  # restore
+print()
+
+# ==============================================================
+# 6. Individual transcendences
+# ==============================================================
+print("=" * 70)
+print("6. INDIVIDUAL TRANSCENDENCES (Hermite 1873, Lindemann 1882)")
+print("=" * 70)
+for label, x in [("e^(-1)", einv_mp), ("π", pi_mp)]:
+    print(f"   Is {label} root of an integer polynomial of degree ≤ d?")
+    for deg in range(2, 6):
+        mons = [x**k for k in range(deg + 1)]
+        rel = pslq(mons, maxcoeff=10**15, maxsteps=10**5)
+        status = "NO relation" if rel is None else f"relation {rel}"
+        print(f"      degree ≤ {deg}: {status}")
+print()
+
+# ==============================================================
+# 7. High-precision value of δ vs OEIS A073003
+# ==============================================================
+print("=" * 70)
+print("7. HIGH-PRECISION VALUE OF δ")
+print("=" * 70)
+mp.dps = 200
+delta_200 = mp.e * mp.e1(1)
+print(f"   δ = {nstr(delta_200, 100)}")
+print()
+oeis_str = ("0.59634736232319407434107849936927937607417786015254878157348491"
+            "0482327219114874417271910168")
+diff = abs(delta_200 - mp.mpf(oeis_str))
+print(f"   |δ - OEIS| = {nstr(diff, 5)}")
+print("   → Matches OEIS A073003." if diff < mp.mpf(10)**(-95)
+      else "   → NOTE: verify OEIS text.")
